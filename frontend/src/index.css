@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Quick reset for React Flow */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background-color: #f9fafb;
+}
