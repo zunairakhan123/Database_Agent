@@ -39,6 +39,7 @@ This platform provides a secure, natural language interface for federated data a
 
 ### Agentic SQL Orchestration
 - **Multi-Node Reasoning Graph** — Built on LangGraph to strictly decouple intent routing, context retrieval, SQL generation, and validation into atomic, testable execution nodes.
+- **Concurrent Multi-Chat Capability:** Supports isolated, multi-threaded conversational sessions. Users can run parallel analytical explorations within the same workspace without polluting the LLM's context window or state history.
 - **Graceful Error Sanitization** — A dedicated routing node intercepts raw database stack traces (e.g., DuckDB Binder Errors) and translates them into polite, non-technical business responses, ensuring a leak-proof presentation layer.
 
 ### Federated Data Ingestion
