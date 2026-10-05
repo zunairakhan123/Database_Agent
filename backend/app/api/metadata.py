@@ -1,11 +1,12 @@
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Optional
 from fastapi import APIRouter, Header, HTTPException
 from backend.app.database.session_manager import session_manager
 from backend.app.database.metadata_extractor import extract_schema_entities, enrich_schema_descriptions
 from backend.app.database.metadata_store import metadata_store
 from backend.app.database.semantic_store import semantic_store
 from backend.app.core.semantic_models import JoinRule
+from backend.app.core.schema_models import TableEntity
 from backend.app.agent.semantic_drafter import auto_draft_metrics
 import logging
 
@@ -18,6 +19,81 @@ class SyncRequest(BaseModel):
 class SearchQuery(BaseModel):
     query: str
     top_k: int = 3
+
+class ColumnMetadataEdit(BaseModel):
+    name: str
+    business_name: Optional[str] = Field(default=None, max_length=200)
+
+class MetadataReindexRequest(BaseModel):
+    urn: str
+    business_name: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    columns: List[ColumnMetadataEdit]
+
+@router.get("/metadata/entities")
+def get_metadata_entities(
+    table_name: Optional[str] = None,
+    workspace_id: str = Header(alias="X-Workspace-ID")
+):
+    try:
+        cursor = metadata_store.sqlite.execute(
+            "SELECT urn, payload FROM metadata_registry WHERE workspace_id = ?",
+            (workspace_id,)
+        )
+        entities = []
+        for urn, payload in cursor.fetchall():
+            entity = TableEntity.model_validate_json(payload)
+            fqn = (
+                f"{entity.physical.schema_name}.{entity.physical.table_name}"
+                if entity.physical.schema_name != "main"
+                else entity.physical.table_name
+            )
+            if table_name and fqn != table_name:
+                continue
+            entities.append({
+                "urn": urn,
+                "physical": entity.physical.model_dump(),
+                "business": entity.business.model_dump()
+            })
+        return {"entities": entities}
+    except Exception as e:
+        logger.error(f"[METADATA FETCH FAILED] {str(e)}")
+        raise HTTPException(status_code=500, detail="Unable to load indexed metadata.")
+
+@router.post("/metadata/reindex")
+def reindex_metadata(
+    req: MetadataReindexRequest,
+    workspace_id: str = Header(alias="X-Workspace-ID")
+):
+    try:
+        cursor = metadata_store.sqlite.execute(
+            "SELECT payload FROM metadata_registry WHERE urn = ? AND workspace_id = ?",
+            (req.urn, workspace_id)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Indexed table metadata was not found. Sync the table first.")
+
+        entity = TableEntity.model_validate_json(row[0])
+        known_columns = {column.name: column for column in entity.physical.columns}
+        submitted_columns = {column.name: column for column in req.columns}
+        if len(submitted_columns) != len(req.columns) or set(submitted_columns) != set(known_columns):
+            raise HTTPException(status_code=422, detail="Column metadata must include each indexed column exactly once.")
+
+        if "business_name" in req.model_fields_set:
+            entity.business.business_name = req.business_name
+        if "description" in req.model_fields_set:
+            entity.business.user_description = req.description
+        for name, edit in submitted_columns.items():
+            known_columns[name].business_name = edit.business_name
+
+        metadata_store.reindex_entity(entity)
+        return {"status": "success", "reindexed_table": req.urn}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[METADATA REINDEX FAILED] {str(e)}")
+        raise HTTPException(status_code=500, detail="Unable to save metadata and refresh its search index.")
 
 @router.post("/metadata/sync")
 def sync_metadata(

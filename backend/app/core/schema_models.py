@@ -22,6 +22,7 @@ class PhysicalSchema(BaseModel):
 class BusinessMetadata(BaseModel):
     deterministic_description: Optional[str] = None
     llm_generated_description: Optional[str] = None
+    user_description: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     # --- NEW: UI Friendly Name ---
     business_name: Optional[str] = None
@@ -45,17 +46,23 @@ class TableEntity(BaseModel):
         return hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
         
     def to_embedding_string(self) -> str:
-        """The dense string fed to the embedding model and Cross-Encoder.
-        Strictly excludes business_names to prevent SQL generation hallucinations."""
+        """Build semantic retrieval text; SQL generation still receives physical schema names."""
         
         cols = []
         for c in self.physical.columns:
-            # ONLY physical names and data types are exposed to the LLM
-            cols.append(f"{c.name} ({c.data_type})")
-            
-        # The agent relies purely on the Table-Level description for semantic context
-        table_desc = self.business.deterministic_description or self.business.llm_generated_description or "No description provided."
+            column_label = f" ({c.business_name})" if c.business_name else ""
+            cols.append(f"{c.name}{column_label} ({c.data_type})")
         
-        return f"Table: {self.physical.schema_name}.{self.physical.table_name}. Description: {table_desc}. Columns: {', '.join(cols)}"
+        table_desc = (
+            self.business.user_description
+            or self.business.deterministic_description
+            or self.business.llm_generated_description
+            or "No description provided."
+        )
+        table_name = self.physical.table_name
+        if self.business.business_name:
+            table_name = f"{table_name} ({self.business.business_name})"
+
+        return f"Table: {self.physical.schema_name}.{table_name}. Description: {table_desc}. Columns: {', '.join(cols)}"
 
     

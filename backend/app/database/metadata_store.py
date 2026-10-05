@@ -1,6 +1,5 @@
 import chromadb
 import sqlite3
-import json
 import logging
 from typing import List
 from rank_bm25 import BM25Okapi
@@ -34,17 +33,25 @@ class HybridMetadataStore:
             row = cursor.fetchone()
             if row and row[0] == entity.fingerprint:
                 continue 
-                
-            collection.upsert(
-                ids=[entity.urn],
-                documents=[entity.to_embedding_string()],
-                metadatas=[{"workspace_id": entity.workspace_id, "table_name": entity.physical.table_name}] 
-            )
-            self.sqlite.execute(
-                "REPLACE INTO metadata_registry (urn, workspace_id, fingerprint, payload) VALUES (?, ?, ?, ?)",
-                (entity.urn, entity.workspace_id, entity.fingerprint, entity.model_dump_json())
-            )
+            self._upsert_entity(entity, collection)
         self.sqlite.commit()
+
+    def reindex_entity(self, entity: TableEntity):
+        """Persist edited metadata and always refresh its semantic search document."""
+        collection = self.chroma.get_or_create_collection("schema_rag")
+        self._upsert_entity(entity, collection)
+        self.sqlite.commit()
+
+    def _upsert_entity(self, entity: TableEntity, collection):
+        collection.upsert(
+            ids=[entity.urn],
+            documents=[entity.to_embedding_string()],
+            metadatas=[{"workspace_id": entity.workspace_id, "table_name": entity.physical.table_name}]
+        )
+        self.sqlite.execute(
+            "REPLACE INTO metadata_registry (urn, workspace_id, fingerprint, payload) VALUES (?, ?, ?, ?)",
+            (entity.urn, entity.workspace_id, entity.fingerprint, entity.model_dump_json())
+        )
 
     def hybrid_search(self, workspace_id: str, query: str, top_k: int = 3) -> List[str]:
         """V2 Retrieval: Dense + Clean Lexical -> Cross-Encoder Reranking"""
@@ -71,12 +78,8 @@ class HybridMetadataStore:
             urn_list = []
             for row in rows:
                 urn, payload_str = row[0], row[1]
-                payload = json.loads(payload_str)
-                
-                # FIX: Build corpus only from table names and column names (ignore JSON structural keys)
-                t_name = payload.get("physical", {}).get("table_name", "").lower()
-                cols = [c["name"].lower() for c in payload.get("physical", {}).get("columns", [])]
-                clean_text = f"{t_name} " + " ".join(cols)
+                entity = TableEntity.model_validate_json(payload_str)
+                clean_text = entity.to_embedding_string().lower()
                 
                 corpus.append(clean_text.split())
                 urn_list.append(urn)

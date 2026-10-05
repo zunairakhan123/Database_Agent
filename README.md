@@ -54,6 +54,7 @@ This platform provides a secure, natural language interface for federated data a
 ### Automated Semantic Layer
 - **LLM-Powered Metric Drafting** — Leverages Groq (`openai/gpt-oss-20b`) via strict schema validation to automatically extract physical schemas and draft usable business metrics and synonyms.
 - **Hybrid RRF Retrieval** — Injects context into the agent using a Reciprocal Rank Fusion hybrid search against a persistent SQLite metadata registry, featuring programmatic namespace normalization to prevent catalog misalignments.
+- **Editable Metadata & Re-indexing** — Users can select a synced table in the Data Sources panel, edit its business name, description, and column business names, then choose **Save & Re-index**. The edits are persisted in the SQLite metadata registry and that table's Chroma search document is refreshed, so subsequent schema retrieval can use the updated business terms without changing physical database identifiers.
 
 ### Interactive Visualization & Topology
 - **Interactive ERD Mapper:** A visual, drag-and-drop Entity Relationship Diagram (ERD) interface that allows users to map logical joins, define cardinality (1:1, 1:N), and establish cross-database relationships (e.g., joining a Postgres table directly to a CSV). These visual links instantly compile into the backend's semantic join rules.
